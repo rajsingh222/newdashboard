@@ -1,0 +1,38 @@
+{
+  "name": "dashboard-backend",
+  "version": "1.0.0",
+  "description": "Enterprise Dashboard Backend API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "kill-port 5000 && npm run dev:api",
+    "worker": "node cron.js",
+    "worker:once": "node scripts/run_fetch_once.js",
+    "seed": "node seed.js",
+    "inject:priya-shm": "node scripts/inject_priya_shm_via_admin_api.js",
+    "dev:api": "node server.js"
+  },
+  "dependencies": {
+    "basic-ftp": "^5.2.0",
+    "bcryptjs": "^2.4.3",
+    "cloudinary": "^2.9.0",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "express-validator": "^7.0.1",
+    "fft-js": "^0.0.12",
+    "jsonwebtoken": "^9.0.2",
+    "libmseedjs": "^1.0.2",
+    "mongoose": "^8.1.1",
+    "multer": "^2.0.2",
+    "node-cron": "^4.2.1",
+    "socket.io": "^4.8.3",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "kill-port": "^2.0.1"
+  }
+}
