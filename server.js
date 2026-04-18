@@ -88,6 +88,10 @@ const allowedOrigins = process.env.NODE_ENV === 'production'
     ? (process.env.CLIENT_URL || '').split(',').map(u => u.trim()).filter(Boolean)
     : ['http://localhost:5173', 'http://localhost:3000'];
 
+// Explicitly add known production domains to prevent CORS blocks if env vars are missing
+allowedOrigins.push('https://newdashboard.spplindia.org');
+allowedOrigins.push('http://newdashboard.spplindia.org');
+
 app.use(cors({
     origin: (origin, callback) => {
         // Allow requests with no origin (mobile apps, curl, etc.)
@@ -95,7 +99,11 @@ app.use(cors({
         if (allowedOrigins.includes(origin)) {
             return callback(null, true);
         }
-        callback(new Error('Not allowed by CORS'));
+        // As a fallback for subdomains, allow anything ending in spplindia.org
+        if (origin.endsWith('.spplindia.org') || origin === 'https://spplindia.org') {
+             return callback(null, true);
+        }
+        callback(new Error(`Not allowed by CORS: ${origin}`));
     },
     credentials: true,
 }));
