@@ -276,8 +276,8 @@ const syncLatestFromFtp = async (projectId, type, sourceDoc) => {
 
         sourceDoc.lastRemoteFile = latest.name;
         sourceDoc.lastLocalFile = localFileName;
-    sourceDoc.lastRemoteModifiedAt = latestRemoteModifiedAt || null;
-    sourceDoc.lastRemoteSize = latestRemoteSize;
+        sourceDoc.lastRemoteModifiedAt = latestRemoteModifiedAt || null;
+        sourceDoc.lastRemoteSize = latestRemoteSize;
         sourceDoc.lastSyncedAt = new Date();
         sourceDoc.lastSyncError = '';
         await sourceDoc.save();
@@ -524,8 +524,8 @@ exports.streamLiveMseed = async (req, res) => {
         pythonExec,
         [STREAM_SCRIPT, fullPath, '--chunk-duration', chunkDuration, '--downsample', downsample, '--speed', speed],
         {
-        cwd: path.join(__dirname, '..'),
-        stdio: ['ignore', 'pipe', 'pipe'],
+            cwd: path.join(__dirname, '..'),
+            stdio: ['ignore', 'pipe', 'pipe'],
         }
     );
 
