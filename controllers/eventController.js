@@ -70,3 +70,57 @@ exports.getRecentProjectEventProcessStatuses = async (req, res) => {
         });
     }
 };
+
+// @desc    Manually insert a realtime event (e.g. from frontend custom socket)
+// @route   POST /api/projects/:projectId/events
+// @access  Private (verifyProjectAccess)
+exports.createProjectEvent = async (req, res) => {
+    try {
+        const { projectId } = req.params;
+        const { eventType, severity, peak, rms, duration, dominantFrequency, timestamp, filename } = req.body;
+
+        const projectName = req.project ? req.project.projectName : 'Unknown Project';
+
+        // map severity to schema enum (Low, Medium, High)
+        let mappedSeverity = 'Medium';
+        if (severity) {
+            const lower = severity.toLowerCase();
+            if (lower.includes('high') || lower.includes('critical')) mappedSeverity = 'High';
+            else if (lower.includes('low')) mappedSeverity = 'Low';
+        }
+
+        // map eventType to schema enum (Severe Event, Impact Event, Continuous Vibration, Normal)
+        let mappedEventType = 'Normal';
+        if (eventType) {
+            const lower = eventType.toLowerCase();
+            if (lower.includes('sever')) mappedEventType = 'Severe Event';
+            else if (lower.includes('impact')) mappedEventType = 'Impact Event';
+            else if (lower.includes('continu')) mappedEventType = 'Continuous Vibration';
+            else if (lower.includes('trigger')) mappedEventType = 'Severe Event'; // fallback for 'Triggered Event'
+        }
+
+        const newEvent = await Event.create({
+            projectId,
+            projectName,
+            timestamp: timestamp || new Date(),
+            peak: peak || 0,
+            rms: rms || 0,
+            duration: duration || 0,
+            dominantFrequency: dominantFrequency || 0,
+            eventType: mappedEventType,
+            severity: mappedSeverity,
+            sourceFile: filename || '',
+        });
+
+        return res.status(201).json({
+            success: true,
+            event: newEvent
+        });
+    } catch (error) {
+        console.error('Create project event error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Server error creating project event',
+        });
+    }
+};

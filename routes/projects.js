@@ -112,6 +112,7 @@ router.get('/:projectId/shm/:type/live/files', verifyProjectAccess, listLiveMsee
 router.post('/:projectId/shm/:type/live/upload', authorize('admin'), verifyProjectAccess, mseedUploadMiddleware, uploadLiveMseedFile);
 router.get('/:projectId/shm/:type/live/stream', verifyProjectAccess, streamLiveMseed);
 router.get('/:projectId/events/recent', verifyProjectAccess, getRecentProjectEvents);
+router.post('/:projectId/events', verifyProjectAccess, require('../controllers/eventController').createProjectEvent);
 router.get('/:projectId/events/process-status/recent', verifyProjectAccess, getRecentProjectEventProcessStatuses);
 
 // Report sub-routes (project-scoped)
