@@ -6,7 +6,7 @@ const { spawn } = require('child_process');
 const ftp = require('basic-ftp');
 const SHMLiveSource = require('../models/SHMLiveSource');
 const Project = require('../models/Project');
-const { parseMseedFile } = require('../services/mseedParser');
+const { parseMseedFile, parseMseedTraces } = require('../services/mseedParser');
 const logger = require('../utils/logger');
 
 const LIVE_BASE_DIR = path.join(__dirname, '..', 'uploads', 'shm-live');
@@ -239,6 +239,65 @@ const inferSampleRate = (parsed = {}) => {
     return 100;
 };
 
+const buildJsSensorTraces = (traces = []) => {
+    const sorted = [...traces].sort((a, b) => String(a.channel || a.traceId).localeCompare(String(b.channel || b.traceId)));
+    if (!sorted.length) return [];
+
+    const sensors = [];
+    for (let i = 0; i < sorted.length; i += 3) {
+        const tx = sorted[i] || null;
+        const ty = sorted[i + 1] || null;
+        const tz = sorted[i + 2] || null;
+        if (!tx) continue;
+
+        const maxLen = Math.max(tx?.signal?.length || 0, ty?.signal?.length || 0, tz?.signal?.length || 0);
+        const sampleRate = Number(tx?.sampleRate || ty?.sampleRate || tz?.sampleRate || 100);
+        const stepMs = sampleRate > 0 ? (1000 / sampleRate) : 10;
+        const fallbackStart =
+            toEpochMs(tx?.timestamp)
+            || toEpochMs(ty?.timestamp)
+            || toEpochMs(tz?.timestamp)
+            || Date.now();
+
+        const X = [];
+        const Y = [];
+        const Z = [];
+        const timestamps = [];
+
+        for (let idx = 0; idx < maxLen; idx += 1) {
+            const xVal = Number(tx?.signal?.[idx]);
+            const yVal = Number(ty?.signal?.[idx]);
+            const zVal = Number(tz?.signal?.[idx]);
+
+            X.push(Number.isFinite(xVal) ? xVal : 0);
+            Y.push(Number.isFinite(yVal) ? yVal : 0);
+            Z.push(Number.isFinite(zVal) ? zVal : 0);
+
+            const ts =
+                toEpochMs(tx?.timestamps?.[idx])
+                || toEpochMs(ty?.timestamps?.[idx])
+                || toEpochMs(tz?.timestamps?.[idx])
+                || (fallbackStart + Math.round(idx * stepMs));
+            timestamps.push(ts / 1000);
+        }
+
+        const base = String(tx?.baseId || tx?.traceId || `Sensor_${sensors.length + 1}`);
+        sensors.push({
+            name: `${base}-${Math.floor(i / 3) + 1}`,
+            sampleRate: sampleRate > 0 ? sampleRate : 100,
+            X,
+            Y,
+            Z,
+            timestamps,
+            channelX: tx?.channel || 'X',
+            channelY: ty?.channel || 'Y',
+            channelZ: tz?.channel || 'Z',
+        });
+    }
+
+    return sensors;
+};
+
 const streamLiveWithJsParser = async ({
     streamId,
     filePath,
@@ -262,25 +321,44 @@ const streamLiveWithJsParser = async ({
         speed,
     });
 
-    const parsed = await parseMseedFile(filePath);
-    const signal = Array.isArray(parsed?.signal) ? parsed.signal : [];
-    const timestamps = Array.isArray(parsed?.timestamps) ? parsed.timestamps : [];
+    let traces = await parseMseedTraces(filePath);
+    if (!Array.isArray(traces) || !traces.length) {
+        const parsed = await parseMseedFile(filePath);
+        const signal = Array.isArray(parsed?.signal) ? parsed.signal : [];
+        const timestamps = Array.isArray(parsed?.timestamps) ? parsed.timestamps : [];
 
-    if (!signal.length) {
-        sendSSE({ type: 'error', data: { message: 'JS parser found no samples in MiniSEED file' } });
+        if (signal.length) {
+            traces = [{
+                traceId: 'Sensor_1.X',
+                channel: 'X',
+                baseId: 'Sensor_1',
+                sampleRate: Number(parsed?.sampleRate || 100),
+                timestamp: parsed?.timestamp || new Date(),
+                signal,
+                timestamps,
+            }];
+        }
+    }
+
+    const sensors = buildJsSensorTraces(traces || []);
+    if (!sensors.length) {
+        sendSSE({ type: 'error', data: { message: 'JS parser found no usable sensor traces in MiniSEED file' } });
         sendSSE({ type: 'stream_end', data: { code: 1, parser: 'js' } });
         return;
     }
 
-    const samplingRate = inferSampleRate(parsed);
-    const startMs = toEpochMs(parsed?.timestamp) || toEpochMs(timestamps[0]) || Date.now();
-    const endMs = startMs + Math.round(((signal.length - 1) * 1000) / Math.max(1, samplingRate));
+    const samplingRate = Number(sensors[0]?.sampleRate || 100);
+    const firstTs = sensors[0]?.timestamps?.[0] || (Date.now() / 1000);
+    const lastTs = sensors[0]?.timestamps?.[(sensors[0]?.timestamps?.length || 1) - 1] || firstTs;
+    const startMs = Math.round(Number(firstTs) * 1000);
+    const endMs = Math.round(Number(lastTs) * 1000);
 
     const safeChunkDuration = Math.max(0.05, Number(chunkDuration || 0.25));
     const safeDownsample = Math.max(1, Number.parseInt(downsample, 10) || 1);
     const safeSpeed = Math.max(0.01, Number(speed || 1));
     const chunkSamples = Math.max(1, Math.floor(samplingRate * safeChunkDuration));
-    const totalChunks = Math.ceil(signal.length / chunkSamples);
+    const totalSamples = Math.max(...sensors.map((s) => s.timestamps.length));
+    const totalChunks = Math.ceil(totalSamples / chunkSamples);
 
     logger.info('SHM live JS parser metadata', {
         streamId,
@@ -288,7 +366,8 @@ const streamLiveWithJsParser = async ({
         type,
         file: selectedFile,
         samplingRate,
-        samples: signal.length,
+        samples: totalSamples,
+        sensors: sensors.length,
         totalChunks,
     });
 
@@ -297,37 +376,50 @@ const streamLiveWithJsParser = async ({
         data: {
             filename: selectedFile,
             sampling_rate: samplingRate,
-            npts: signal.length,
-            duration_sec: Number((signal.length / Math.max(1, samplingRate)).toFixed(3)),
+            npts: totalSamples,
+            duration_sec: Number((totalSamples / Math.max(1, samplingRate)).toFixed(3)),
             start_time: new Date(startMs).toISOString(),
             end_time: new Date(endMs).toISOString(),
-            num_sensors: 1,
-            sensor_names: ['Sensor_1'],
+            num_sensors: sensors.length,
+            sensor_names: sensors.map((s) => s.name),
         },
     });
 
     const runStartMs = Date.now();
     let chunkIndex = 0;
 
-    for (let startIdx = 0; startIdx < signal.length; startIdx += chunkSamples) {
+    for (let startIdx = 0; startIdx < totalSamples; startIdx += chunkSamples) {
         if (isClientClosed()) return;
 
-        const endIdx = Math.min(startIdx + chunkSamples, signal.length);
-        const X = [];
-        const Y = [];
-        const Z = [];
-        const chunkTs = [];
+        const endIdx = Math.min(startIdx + chunkSamples, totalSamples);
 
-        for (let i = startIdx; i < endIdx; i += safeDownsample) {
-            const value = Number(signal[i]);
-            const safeValue = Number.isFinite(value) ? value : 0;
+        const payloadSensors = {};
+        for (const sensor of sensors) {
+            payloadSensors[sensor.name] = {
+                X: [],
+                Y: [],
+                Z: [],
+                timestamps: [],
+                channelX: sensor.channelX || 'X',
+                channelY: sensor.channelY || 'Y',
+                channelZ: sensor.channelZ || 'Z',
+            };
 
-            X.push(safeValue);
-            Y.push(safeValue);
-            Z.push(safeValue);
+            for (let i = startIdx; i < endIdx; i += safeDownsample) {
+                const xVal = Number(sensor.X[i]);
+                const yVal = Number(sensor.Y[i]);
+                const zVal = Number(sensor.Z[i]);
+                const tsVal = Number(sensor.timestamps[i]);
 
-            const pointMs = toEpochMs(timestamps[i]) || (startMs + Math.round((i * 1000) / Math.max(1, samplingRate)));
-            chunkTs.push(pointMs / 1000);
+                payloadSensors[sensor.name].X.push(Number.isFinite(xVal) ? xVal : 0);
+                payloadSensors[sensor.name].Y.push(Number.isFinite(yVal) ? yVal : 0);
+                payloadSensors[sensor.name].Z.push(Number.isFinite(zVal) ? zVal : 0);
+
+                const pointTs = Number.isFinite(tsVal)
+                    ? tsVal
+                    : ((startMs + Math.round((i * 1000) / Math.max(1, samplingRate))) / 1000);
+                payloadSensors[sensor.name].timestamps.push(pointTs);
+            }
         }
 
         const chunkStartMs = startMs + Math.round((startIdx * 1000) / Math.max(1, samplingRate));
@@ -341,23 +433,13 @@ const streamLiveWithJsParser = async ({
                 total_chunks: totalChunks,
                 start_sample: startIdx,
                 end_sample: endIdx,
-                total_samples: signal.length,
-                progress: Number((endIdx / signal.length).toFixed(6)),
+                total_samples: totalSamples,
+                progress: Number((endIdx / totalSamples).toFixed(6)),
                 elapsed_sec: Number((endIdx / Math.max(1, samplingRate)).toFixed(6)),
                 chunk_start_time: new Date(chunkStartMs).toISOString(),
                 chunk_end_time: new Date(chunkEndMs).toISOString(),
                 last_sample_time: new Date(lastSampleMs).toISOString(),
-                sensors: {
-                    Sensor_1: {
-                        X,
-                        Y,
-                        Z,
-                        timestamps: chunkTs,
-                        channelX: 'X',
-                        channelY: 'Y',
-                        channelZ: 'Z',
-                    },
-                },
+                sensors: payloadSensors,
             },
         });
 

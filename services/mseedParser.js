@@ -156,6 +156,97 @@ const parseWithIris = (fileBuffer) => {
     };
 };
 
+const traceIdFromRecord = (record = {}) => {
+    const header = record?.header || {};
+    const parts = [header.network, header.station, header.location, header.channel]
+        .map((p) => String(p || '').trim())
+        .filter(Boolean);
+
+    const fromHeader = parts.join('.');
+    const fromIdFn = typeof record?.id === 'function' ? String(record.id() || '').trim() : '';
+    const traceId = fromHeader || fromIdFn || String(header.channel || '').trim() || 'trace';
+
+    const channel = String(header.channel || '').trim() || traceId.split('.').pop() || traceId;
+    const baseParts = traceId.split('.');
+    const baseId = baseParts.length > 1 ? baseParts.slice(0, -1).join('.') : traceId;
+
+    return {
+        traceId,
+        channel,
+        baseId,
+    };
+};
+
+const parseWithLibmseedTraces = (fileBuffer) => {
+    const tracesMap = new Map();
+    let offset = 0;
+
+    let recordLength = detectRecordLength(fileBuffer.slice(0, Math.min(fileBuffer.length, 4096)));
+
+    while (offset + 64 <= fileBuffer.length) {
+        if (offset + recordLength > fileBuffer.length) break;
+
+        const recordBuffer = fileBuffer.slice(offset, offset + recordLength);
+
+        try {
+            const record = new MSeedRecord(recordBuffer);
+            const recordData = Array.isArray(record.data) ? record.data : [];
+            if (!recordData.length) {
+                offset += recordLength;
+                continue;
+            }
+
+            const sr = Number(record?.header?.sampleRate || 0);
+            const recordStart = toMillis(record?.header?.start);
+            const stepMs = sr > 0 ? (1000 / sr) : 0;
+            const { traceId, channel, baseId } = traceIdFromRecord(record);
+
+            if (!tracesMap.has(traceId)) {
+                tracesMap.set(traceId, {
+                    traceId,
+                    channel,
+                    baseId,
+                    sampleRate: sr > 0 ? sr : 0,
+                    timestamp: recordStart ? new Date(recordStart) : new Date(),
+                    signal: [],
+                    timestamps: [],
+                });
+            }
+
+            const trace = tracesMap.get(traceId);
+            if (sr > 0) trace.sampleRate = sr;
+            if (recordStart && (!trace.timestamp || recordStart < toMillis(trace.timestamp))) {
+                trace.timestamp = new Date(recordStart);
+            }
+
+            for (let i = 0; i < recordData.length; i += 1) {
+                const value = Number(recordData[i]);
+                if (!Number.isFinite(value)) continue;
+
+                trace.signal.push(value);
+                if (recordStart && stepMs > 0) {
+                    trace.timestamps.push(recordStart + Math.round(i * stepMs));
+                }
+            }
+
+            recordLength = detectRecordLength(recordBuffer);
+        } catch (error) {
+            // Keep scanning even if one record block is malformed.
+        }
+
+        offset += recordLength;
+    }
+
+    return Array.from(tracesMap.values());
+};
+
+const parseMseedTraces = async (filePath) => {
+    const fileBuffer = fs.readFileSync(filePath);
+    if (!fileBuffer || fileBuffer.length < 64) return [];
+
+    return parseWithLibmseedTraces(fileBuffer);
+};
+
 const parseMseedFile = async (filePath) => {
     const fileBuffer = fs.readFileSync(filePath);
     if (!fileBuffer || fileBuffer.length < 64) {
@@ -175,4 +266,5 @@ const parseMseedFile = async (filePath) => {
 
 module.exports = {
     parseMseedFile,
+    parseMseedTraces,
 };
