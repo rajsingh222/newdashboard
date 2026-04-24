@@ -131,6 +131,8 @@ app.use('/api/ingestion/projects', require('./routes/projectRoutes'));
 app.use('/api/data', require('./routes/dataRoutes'));
 app.use('/api/project', require('./routes/projectDashboard'));
 app.use('/api/chatbot', require('./routes/chatbot'));
+app.use('/api/waveforms', require('./routes/waveforms'));
+app.use('/api', require('./routes/testOutputStream'));
 
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));

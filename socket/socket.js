@@ -1,9 +1,11 @@
 const { Server } = require('socket.io');
 const logger = require('../utils/logger');
+const { startTriggeredJsonWatcher } = require('../services/triggeredJsonService');
 
 let io = null;
 let eventChangeStream = null;
 let eventPollingTimer = null;
+let triggeredJsonWatcherStop = null;
 let pollingInProgress = false;
 let lastBroadcastedEventId = null;
 let eventProcessStatusHistory = [];
@@ -82,6 +84,12 @@ const initSocket = (httpServer, allowedOrigins = []) => {
             logger.info('Socket client disconnected', { socketId: socket.id });
         });
     });
+
+    // Start triggered JSON watcher
+    if (io) {
+        triggeredJsonWatcherStop = startTriggeredJsonWatcher(io);
+        logger.info('Triggered JSON watcher started');
+    }
 
     return io;
 };
@@ -207,6 +215,14 @@ const stopEventBroadcastWatcher = async () => {
     eventChangeStream = null;
 };
 
+const stopTriggeredJsonWatcher = () => {
+    if (triggeredJsonWatcherStop) {
+        triggeredJsonWatcherStop();
+        triggeredJsonWatcherStop = null;
+        logger.info('Triggered JSON watcher stopped');
+    }
+};
+
 module.exports = {
     initSocket,
     getIo,
@@ -215,4 +231,5 @@ module.exports = {
     getRecentEventProcessStatuses,
     startEventBroadcastWatcher,
     stopEventBroadcastWatcher,
+    stopTriggeredJsonWatcher,
 };

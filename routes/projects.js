@@ -38,7 +38,14 @@ const {
 } = require('../controllers/shmLiveController');
 const { getRecentProjectEvents, getRecentProjectEventProcessStatuses } = require('../controllers/eventController');
 const { protect, authorize, verifyProjectAccess } = require('../middleware/auth');
+const {
+    getReportDraft,
+    addItemToDraft,
+    removeItemFromDraft,
+    clearReportDraft
+} = require('../controllers/reportDraftController');
 const validate = require('../middleware/validate');
+
 
 const router = express.Router();
 
@@ -126,4 +133,11 @@ router.post(
     uploadReport
 );
 
+// Report draft routes
+router.get('/:projectId/report-draft', verifyProjectAccess, getReportDraft);
+router.post('/:projectId/report-draft/items', verifyProjectAccess, addItemToDraft);
+router.delete('/:projectId/report-draft/items/:itemId', verifyProjectAccess, removeItemFromDraft);
+router.delete('/:projectId/report-draft', verifyProjectAccess, clearReportDraft);
+
 module.exports = router;
+
