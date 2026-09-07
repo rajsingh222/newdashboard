@@ -8,6 +8,7 @@
     "dev": "kill-port 5000 && npm run dev:api",
     "worker": "node cron.js",
     "worker:once": "node scripts/run_fetch_once.js",
+    "test:trigger-notification": "node scripts/test_triggered_event_notification.js",
     "seed": "node seed.js",
     "inject:priya-shm": "node scripts/inject_priya_shm_via_admin_api.js",
     "dev:api": "node server.js"
@@ -23,11 +24,13 @@
     "express-rate-limit": "^7.1.5",
     "express-validator": "^7.0.1",
     "fft-js": "^0.0.12",
+    "firebase-admin": "^13.10.0",
     "jsonwebtoken": "^9.0.2",
     "libmseedjs": "^1.0.2",
     "mongoose": "^8.1.1",
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",
+    "nodemailer": "^9.0.4",
     "socket.io": "^4.8.3",
     "xlsx": "^0.18.5"
   },

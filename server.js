@@ -55,7 +55,7 @@ const defaultModules = [
         icon: 'HiOutlineDocumentReport',
         description: 'Analyze reports and extract insights for decision-making',
     },
-];
+    ]
 
 const ensureDefaultModules = async () => {
     for (const moduleData of defaultModules) {
@@ -70,15 +70,23 @@ const ensureDefaultModules = async () => {
 const app = express();
 
 // Rate limiting
-const limiter = rateLimit({
+const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 500,
+    max: 20, // 20 login attempts per 15 mins
+    message: {
+        success: false,
+        message: 'Too many login attempts, please try again after 15 minutes',
+    },
+});
+
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5000, // Higher capacity for real-time telemetry dashboard polling
     message: {
         success: false,
         message: 'Too many requests, please try again later',
     },
 });
-
 // Middleware
 // Trust proxy (required for Render, AWS ALB, etc.)
 app.set('trust proxy', 1);
@@ -92,18 +100,45 @@ const allowedOrigins = process.env.NODE_ENV === 'production'
 allowedOrigins.push('https://newdashboard.spplindia.org');
 allowedOrigins.push('http://newdashboard.spplindia.org');
 
+// Helper to identify local development origins
+const isLocalOrigin = (originUrl) => {
+    try {
+        const url = new URL(originUrl);
+        const hostname = url.hostname;
+        return (
+            hostname === 'localhost' ||
+            hostname === '127.0.0.1' ||
+            hostname.startsWith('192.168.') ||
+            hostname.startsWith('10.') ||
+            hostname.startsWith('172.') ||
+            hostname === '::1'
+        );
+    } catch {
+        return false;
+    }
+};
+
 app.use(cors({
     origin: (origin, callback) => {
         // Allow requests with no origin (mobile apps, curl, etc.)
         if (!origin) return callback(null, true);
+
+        // In development, automatically allow all local/LAN origins on any port
+        if (process.env.NODE_ENV !== 'production' && isLocalOrigin(origin)) {
+            return callback(null, true);
+        }
+
         if (allowedOrigins.includes(origin)) {
             return callback(null, true);
         }
         // As a fallback for subdomains, allow anything ending in spplindia.org
         if (origin.endsWith('.spplindia.org') || origin === 'https://spplindia.org') {
-             return callback(null, true);
+            return callback(null, true);
         }
-        callback(new Error(`Not allowed by CORS: ${origin}`));
+
+        const err = new Error(`Not allowed by CORS: ${origin}`);
+        err.status = 403; // return 403 Forbidden instead of 500 Internal Server Error
+        callback(err);
     },
     credentials: true,
 }));
@@ -119,11 +154,15 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-app.use('/api/', limiter);
+
+// Apply rate limiters
+app.use('/api/auth/login', loginLimiter);
+app.use('/api/', apiLimiter);
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));
+app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/modules', require('./routes/modules'));
 app.use('/api', require('./routes/eventTrigger'));
 app.use('/api/projects', require('./routes/projects'));
@@ -136,6 +175,21 @@ app.use('/api', require('./routes/testOutputStream'));
 
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', (req, res, next) => {
+    const ext = path.extname(req.path).toLowerCase();
+    if (['.png', '.jpg', '.jpeg', '.webp', '.svg', '.gif'].includes(ext)) {
+        res.setHeader('Content-Type', 'image/svg+xml');
+        return res.status(200).send(`
+            <svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200">
+                <rect width="100%" height="100%" fill="#1e293b"/>
+                <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#94a3b8" font-family="sans-serif" font-size="14" font-weight="bold">
+                    Sanrachna Prahari Asset Placeholder
+                </text>
+            </svg>
+        `);
+    }
+    next();
+});
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -152,11 +206,18 @@ app.use((req, res) => {
 
 // Global error handler
 app.use((err, req, res, next) => {
-    console.error('Unhandled error:', err);
-    res.status(500).json({
-        success: false,
-        message: 'Internal server error',
-    });
+    console.error(`Unhandled error on ${req.method} ${req.originalUrl}:`, err);
+    if (process.env.NODE_ENV !== 'production') {
+        console.error(err.stack);
+    }
+
+    const statusCode = err.status || 500;
+    const message = process.env.NODE_ENV !== 'production' ? (err.message || 'Internal server error') : 'Internal server error';
+
+    const payload = { success: false, message };
+    if (process.env.NODE_ENV !== 'production') payload.error = err.stack;
+
+    res.status(statusCode).json(payload);
 });
 
 const PORT = process.env.PORT || 5000;

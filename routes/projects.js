@@ -46,7 +46,6 @@ const {
 } = require('../controllers/reportDraftController');
 const validate = require('../middleware/validate');
 
-
 const router = express.Router();
 
 // All routes are protected
@@ -54,29 +53,13 @@ router.use(protect);
 
 // Project CRUD
 router.get('/', getProjects);
-
 router.post(
     '/',
-    authorize('admin'),
     validate([
         body('projectName').notEmpty().withMessage('Project name is required'),
-        body('projectCode').notEmpty().withMessage('Project code is required'),
-        body('type').optional().isIn(['excel', 'mseed']).withMessage('type must be excel or mseed'),
-        body('ftp.port').optional().isInt({ min: 1, max: 65535 }).withMessage('ftp.port must be between 1 and 65535'),
-        body('ftp.host').optional().isString(),
-        body('ftp.user').optional().isString(),
-        body('ftp.password').optional().isString(),
-        body('ftp.path').optional().isString(),
-        body('lastRealtimeFile').optional().isString(),
-        body('eventThresholds.peakSevere').optional().isNumeric(),
-        body('eventThresholds.peakImpact').optional().isNumeric(),
-        body('eventThresholds.impactDurationSec').optional().isNumeric(),
-        body('eventThresholds.rmsContinuous').optional().isNumeric(),
-        body('eventThresholds.continuousDurationSec').optional().isNumeric(),
     ]),
     createProject
 );
-
 router.get('/:id', verifyProjectAccess, getProject);
 router.put('/:id', authorize('admin'), updateProject);
 router.delete('/:id', authorize('admin'), deleteProject);

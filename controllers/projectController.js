@@ -176,40 +176,66 @@ const syncDynamicLiveSourceFromProject = async (projectDoc) => {
 
 // @desc    Create project
 // @route   POST /api/projects
-// @access  Private (admin)
+// @access  Private
 exports.createProject = async (req, res) => {
     try {
         const {
             projectName, projectCode, description, startDate, endDate,
             allowedModules, assignedUsers,
             location, latitude, longitude, structureType, projectType, clientName,
+            organization, personName, sector, optedServices, approvalStatus,
             thresholdAlertPdf,
             ftp, type, isActive, lastFetchedAt, lastRealtimeFile, processedFiles, eventThresholds,
         } = req.body;
 
-        const existing = await Project.findOne({ projectCode: projectCode.toUpperCase() });
+        if (!projectName) {
+            return res.status(400).json({ success: false, message: 'Project name is required' });
+        }
+
+        const generatedCode = (projectCode || `PRJ-${Date.now().toString().slice(-6)}`).toUpperCase();
+
+        const existing = await Project.findOne({ projectCode: generatedCode });
         if (existing) {
             return res.status(400).json({ success: false, message: 'Project code already exists' });
         }
 
+        // If allowedModules not passed, default to all modules in database
+        let modulesToAssign = allowedModules;
+        if (!modulesToAssign || modulesToAssign.length === 0) {
+            const Module = require('../models/Module');
+            const allMods = await Module.find({});
+            modulesToAssign = allMods.map((m) => m._id);
+        }
+
+        // Add creating user to assignedUsers list
+        const initialUsers = Array.isArray(assignedUsers) ? [...assignedUsers] : [];
+        if (req.user?._id && !initialUsers.includes(req.user._id.toString())) {
+            initialUsers.push(req.user._id);
+        }
+
         const project = await Project.create({
             projectName,
-            projectCode: projectCode.toUpperCase(),
-            description,
-            startDate,
-            endDate,
-            allowedModules: allowedModules || [],
-            assignedUsers: assignedUsers || [],
+            projectCode: generatedCode,
+            description: description || '',
+            startDate: startDate || Date.now(),
+            endDate: endDate || null,
+            allowedModules: modulesToAssign,
+            assignedUsers: initialUsers,
             location: location || '',
-            latitude: latitude || null,
-            longitude: longitude || null,
+            latitude: latitude ? parseFloat(latitude) : null,
+            longitude: longitude ? parseFloat(longitude) : null,
             structureType: structureType || '',
             projectType: projectType || '',
             clientName: clientName || '',
+            organization: organization || '',
+            personName: personName || req.user.name || '',
+            sector: sector || '',
+            optedServices: Array.isArray(optedServices) ? optedServices : [],
+            approvalStatus: req.user.role === 'admin' ? (approvalStatus || 'approved') : 'pending_approval',
             thresholdAlertPdf: (thresholdAlertPdf || '').toString().trim(),
             ftp: normalizeFtpPayload(ftp || {}),
             type: (type === 'excel' || type === 'mseed') ? type : 'mseed',
-            isActive: Boolean(isActive),
+            isActive: req.user.role === 'admin' ? Boolean(isActive) : true,
             lastFetchedAt: lastFetchedAt || null,
             lastRealtimeFile: (lastRealtimeFile || '').toString().trim(),
             processedFiles: Array.isArray(processedFiles)
@@ -221,10 +247,10 @@ exports.createProject = async (req, res) => {
 
         await syncDynamicLiveSourceFromProject(project);
 
-        // Add project to each assigned user's assignedProjects
-        if (assignedUsers && assignedUsers.length > 0) {
+        // Add project to assigned users' assignedProjects array
+        if (initialUsers.length > 0) {
             await User.updateMany(
-                { _id: { $in: assignedUsers } },
+                { _id: { $in: initialUsers } },
                 { $addToSet: { assignedProjects: project._id } }
             );
         }
@@ -234,7 +260,7 @@ exports.createProject = async (req, res) => {
             .populate('assignedUsers', 'name email username role')
             .populate('createdBy', 'name email');
 
-        res.status(201).json({ success: true, project: populated });
+        res.status(201).json({ success: true, project: populated, message: 'Project registered successfully!' });
     } catch (error) {
         console.error('Create project error:', error);
         res.status(500).json({ success: false, message: 'Server error creating project' });
@@ -248,9 +274,14 @@ exports.getProjects = async (req, res) => {
     try {
         let query = {};
 
-        // Regular users only see their assigned projects, admin sees all
+        // Regular users see their assigned or created projects, admin sees all
         if (req.user.role !== 'admin') {
-            query = { assignedUsers: req.user._id };
+            query = {
+                $or: [
+                    { assignedUsers: req.user._id },
+                    { createdBy: req.user._id },
+                ],
+            };
         }
 
         const projects = await Project.find(query)
@@ -348,6 +379,11 @@ exports.updateProject = async (req, res) => {
         if (structureType !== undefined) updateFields.structureType = structureType;
         if (projectType !== undefined) updateFields.projectType = projectType;
         if (clientName !== undefined) updateFields.clientName = clientName;
+        if (organization !== undefined) updateFields.organization = organization;
+        if (personName !== undefined) updateFields.personName = personName;
+        if (sector !== undefined) updateFields.sector = sector;
+        if (optedServices !== undefined) updateFields.optedServices = Array.isArray(optedServices) ? optedServices : [];
+        if (approvalStatus !== undefined) updateFields.approvalStatus = approvalStatus;
         if (thresholdAlertPdf !== undefined) {
             updateFields.thresholdAlertPdf = (thresholdAlertPdf || '').toString().trim();
         }

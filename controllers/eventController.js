@@ -1,5 +1,6 @@
 const Event = require('../models/Event');
 const { getRecentEventProcessStatuses } = require('../socket/socket');
+const { sendEventNotificationToProjectUsers } = require('../services/notificationService');
 
 const parseLimit = (rawValue, fallback = 20) => {
     const parsed = Number(rawValue);
@@ -110,6 +111,17 @@ exports.createProjectEvent = async (req, res) => {
             eventType: mappedEventType,
             severity: mappedSeverity,
             sourceFile: filename || '',
+        });
+
+        sendEventNotificationToProjectUsers({
+            projectId,
+            eventDoc: newEvent,
+        }).catch((notificationError) => {
+            console.warn('Failed to send manual project event FCM notification:', {
+                projectId: String(projectId),
+                eventId: String(newEvent._id),
+                error: notificationError.message,
+            });
         });
 
         return res.status(201).json({

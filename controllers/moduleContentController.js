@@ -100,11 +100,40 @@ exports.graphUploadMiddleware = multer({
     limits: { fileSize: 10 * 1024 * 1024 },
 }).single('graph');
 
+const Module = require('../models/Module');
+const mongoose = require('mongoose');
+
+const resolveModuleId = async (moduleIdParam) => {
+    if (!moduleIdParam) return null;
+    if (mongoose.Types.ObjectId.isValid(moduleIdParam)) {
+        const existing = await Module.findById(moduleIdParam);
+        if (existing) return existing._id;
+    }
+
+    const formattedSlug = String(moduleIdParam).trim().toLowerCase();
+    const mod = await Module.findOne({
+        $or: [
+            { routePath: `/modules/${formattedSlug}` },
+            { routePath: formattedSlug },
+            { moduleName: new RegExp(`^${formattedSlug.replace(/-/g, ' ')}$`, 'i') },
+            { moduleName: new RegExp(`^${formattedSlug}$`, 'i') },
+        ],
+    });
+
+    return mod ? mod._id : (mongoose.Types.ObjectId.isValid(moduleIdParam) ? moduleIdParam : null);
+};
+
 // ── GET content ──
 exports.getModuleContent = async (req, res) => {
     try {
-        const { projectId, moduleId } = req.params;
-        let content = await ModuleContent.findOne({ project: projectId, module: moduleId });
+        const { projectId, moduleId: rawModuleId } = req.params;
+        const resolvedModuleId = await resolveModuleId(rawModuleId);
+
+        if (!resolvedModuleId) {
+            return res.json({ success: true, content: { details: '', keyValues: [], images: [], graphs: [], reports: [] } });
+        }
+
+        let content = await ModuleContent.findOne({ project: projectId, module: resolvedModuleId });
         if (!content) {
             return res.json({ success: true, content: { details: '', keyValues: [], images: [], graphs: [], reports: [] } });
         }
@@ -118,7 +147,13 @@ exports.getModuleContent = async (req, res) => {
 // ── PUT (upsert) content details + keyValues ──
 exports.updateModuleContent = async (req, res) => {
     try {
-        const { projectId, moduleId } = req.params;
+        const { projectId, moduleId: rawModuleId } = req.params;
+        const resolvedModuleId = await resolveModuleId(rawModuleId);
+
+        if (!resolvedModuleId) {
+            return res.status(400).json({ success: false, message: 'Invalid module ID' });
+        }
+
         const { details, keyValues } = req.body;
 
         const updateObj = {};
@@ -126,7 +161,7 @@ exports.updateModuleContent = async (req, res) => {
         if (keyValues !== undefined) updateObj.keyValues = keyValues;
 
         let content = await ModuleContent.findOneAndUpdate(
-            { project: projectId, module: moduleId },
+            { project: projectId, module: resolvedModuleId },
             { $set: updateObj },
             { upsert: true, new: true }
         );

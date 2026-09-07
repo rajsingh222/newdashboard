@@ -7,6 +7,7 @@ const { withProjectFtp, downloadRemoteFile } = require('./ftpService');
 const { parseMseedFile } = require('./mseedParser');
 const { analyzeSignal, classifyEvent } = require('./analysisService');
 const { emitEventDetected, emitEventProcessStatus } = require('../socket/socket');
+const { sendEventNotificationToProjectUsers } = require('./notificationService');
 
 const EVENT_TRIGGER_DOWNLOAD_DIR = path.join(__dirname, '..', 'downloads', 'event-trigger');
 const RAW_SIGNAL_LIMIT = Number(process.env.SHM_RAW_SIGNAL_LIMIT || 2048);
@@ -274,6 +275,21 @@ const processEventTrigger = async ({ projectId, fileName, remoteFileHint = null,
                 await project.save();
 
                 emitEventDetected(eventDoc);
+                logger.info('Dispatching event FCM notification', {
+                    projectId: String(project._id),
+                    eventId: String(eventDoc._id),
+                    triggerSource,
+                });
+                sendEventNotificationToProjectUsers({
+                    projectId: project._id,
+                    eventDoc,
+                }).catch((notificationError) => {
+                    logger.warn('Failed to send event FCM notification', {
+                        projectId: String(project._id),
+                        eventId: String(eventDoc._id),
+                        error: notificationError.message,
+                    });
+                });
                 emitStage('EVENT_EMITTED', {
                     eventId: String(eventDoc._id || ''),
                 });

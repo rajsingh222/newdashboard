@@ -49,6 +49,32 @@ const projectSchema = new mongoose.Schema(
             default: '',
             trim: true,
         },
+        organization: {
+            type: String,
+            default: '',
+            trim: true,
+        },
+        personName: {
+            type: String,
+            default: '',
+            trim: true,
+        },
+        sector: {
+            type: String,
+            default: '',
+            trim: true,
+        },
+        optedServices: [
+            {
+                type: String,
+                trim: true,
+            },
+        ],
+        approvalStatus: {
+            type: String,
+            enum: ['pending_approval', 'approved'],
+            default: 'approved',
+        },
         ftp: {
             host: {
                 type: String,
