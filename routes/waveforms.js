@@ -7,7 +7,12 @@ const {
   getCombinedWaveforms,
 } = require('../controllers/waveformController');
 
+const { protect, authorize } = require('../middleware/auth');
+
 const router = express.Router();
+
+// Login required for every waveform route
+router.use(protect);
 
 // Save waveform data
 router.post('/save', saveWaveformData);
@@ -22,6 +27,6 @@ router.get('/:sensor/:channel', getWaveformData);
 router.get('/sensors/list', getSensors);
 
 // Cleanup old data
-router.delete('/cleanup', cleanupOldWaveforms);
+router.delete('/cleanup', authorize('admin'), cleanupOldWaveforms);
 
 module.exports = router;

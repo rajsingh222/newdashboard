@@ -12,30 +12,27 @@ const validate = require('../middleware/validate');
 
 const router = express.Router();
 
-// All routes below are protected
+// All routes below are admin-only
 router.use(protect);
 router.use(authorize('admin'));
 
 router.get('/', getUsers);
 router.get('/:id', getUser);
 
+// Validation of login ID / password rules lives in the controller so the
+// messages stay identical for create and update.
 router.post(
     '/',
     validate([
         body('name').notEmpty().withMessage('Name is required'),
-        body('email').isEmail().withMessage('Valid email is required'),
-        body('username')
-            .isLength({ min: 3 })
-            .withMessage('Username must be at least 3 characters'),
-        body('password')
-            .isLength({ min: 6 })
-            .withMessage('Password must be at least 6 characters'),
+        body('username').notEmpty().withMessage('Login ID is required'),
+        body('password').notEmpty().withMessage('Password is required'),
     ]),
     createUser
 );
 
 router.put('/:id', updateUser);
 
-router.delete('/:id', protect, authorize('admin'), deleteUser);
+router.delete('/:id', deleteUser);
 
 module.exports = router;

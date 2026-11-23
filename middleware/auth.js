@@ -121,5 +121,51 @@ const verifyProjectAccess = async (req, res, next) => {
     }
 };
 
-module.exports = { protect, authorize, verifyProjectAccess };
+const normRoute = (value) => String(value || '').trim().toLowerCase().replace(/\/+$/, '');
+
+const moduleMatches = (mod, { routePath, moduleId }) => {
+    if (!mod) return false;
+    if (moduleId && String(mod._id || mod) === String(moduleId)) return true;
+    return Boolean(routePath) && normRoute(mod.routePath) === normRoute(routePath);
+};
+
+const denyModule = (res) =>
+    res.status(403).json({
+        success: false,
+        message: 'You do not have access to this module',
+    });
+
+/**
+ * Module access check. Must run AFTER protect and verifyProjectAccess.
+ *   verifyModuleAccess('/modules/structural-health-monitoring')   -> by route
+ *   verifyModuleAccess({ fromParam: 'moduleId' })                  -> by Module _id in URL
+ * Admins always pass. Users need the module on their account AND, when the project
+ * restricts its modules, on the project too (an empty project list means "all").
+ */
+const verifyModuleAccess = (target) => (req, res, next) => {
+    if (req.user.role === 'admin') return next();
+
+    const probe = typeof target === 'string'
+        ? { routePath: target }
+        : { moduleId: req.params[target.fromParam] };
+
+    const userHas = (req.user.assignedModules || []).some((m) => moduleMatches(m, probe));
+    if (!userHas) return denyModule(res);
+
+    const projectModules = req.project?.allowedModules || [];
+    if (projectModules.length > 0) {
+        // when checking by id we must resolve the route from the user's own module
+        const resolved = probe.moduleId
+            ? (req.user.assignedModules || []).find((m) => moduleMatches(m, probe))
+            : null;
+        const projectHas = projectModules.some((m) =>
+            moduleMatches(m, resolved ? { moduleId: probe.moduleId, routePath: resolved.routePath } : probe)
+        );
+        if (!projectHas) return denyModule(res);
+    }
+
+    return next();
+};
+
+module.exports = { protect, authorize, verifyProjectAccess, verifyModuleAccess };
 

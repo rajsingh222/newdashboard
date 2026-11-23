@@ -72,7 +72,10 @@ const app = express();
 // Rate limiting
 const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 20, // 20 login attempts per 15 mins
+    max: 20, // 20 failed login attempts per 15 mins
+    // Only failed logins count, so many people signing in from one office IP
+    // (or one account on several devices) are never locked out; guessing still is.
+    skipSuccessfulRequests: true,
     message: {
         success: false,
         message: 'Too many login attempts, please try again after 15 minutes',

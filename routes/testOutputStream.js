@@ -3,7 +3,12 @@ const fs = require('fs/promises');
 const path = require('path');
 const { parseMseedTraces } = require('../services/mseedParser');
 
+const { protect, authorize } = require('../middleware/auth');
+
 const router = express.Router();
+
+// Diagnostic endpoints: admin only
+router.use(['/triggered-spikes', '/test-output-stream', '/triggered-json'], protect, authorize('admin'));
 const OUTPUT_FILE_PATH = path.resolve(__dirname, '..', '..', 'output.json');
 const TRIGGERED_MSEED_FILE_PATH = path.resolve(
     __dirname,

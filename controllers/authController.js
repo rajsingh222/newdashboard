@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const User = require('../models/User');
 const sendEmail = require('../utils/sendEmail');
+const { loginIdQuery } = require('../utils/loginId');
 
 // Generate JWT Token
 const generateToken = (id) => {
@@ -24,9 +25,10 @@ exports.login = async (req, res) => {
             });
         }
 
-        // Find user by email or username
+        // Find user by email or login ID (username) — both case-insensitive
+        const loginValue = String(login).trim();
         const user = await User.findOne({
-            $or: [{ email: login.toLowerCase() }, { username: login }],
+            $or: [{ email: loginValue.toLowerCase() }, loginIdQuery(loginValue)],
         }).select('+password').populate('assignedModules').populate('assignedProjects');
 
         if (!user) {

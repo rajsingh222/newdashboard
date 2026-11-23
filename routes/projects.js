@@ -37,7 +37,7 @@ const {
     updateLiveSourceConfig,
 } = require('../controllers/shmLiveController');
 const { getRecentProjectEvents, getRecentProjectEventProcessStatuses } = require('../controllers/eventController');
-const { protect, authorize, verifyProjectAccess } = require('../middleware/auth');
+const { protect, authorize, verifyProjectAccess, verifyModuleAccess } = require('../middleware/auth');
 const {
     getReportDraft,
     addItemToDraft,
@@ -55,6 +55,7 @@ router.use(protect);
 router.get('/', getProjects);
 router.post(
     '/',
+    authorize('admin'),
     validate([
         body('projectName').notEmpty().withMessage('Project name is required'),
     ]),
@@ -81,7 +82,7 @@ router.post('/:id/threshold-alerts/pdf', authorize('admin'), thresholdAlertPdfUp
 router.delete('/:id/threshold-alerts/pdf', authorize('admin'), deleteThresholdAlertPdf);
 
 // ── Module content routes (per-project, per-module) ──
-router.get('/:projectId/modules/:moduleId/content', getModuleContent);
+router.get('/:projectId/modules/:moduleId/content', verifyProjectAccess, verifyModuleAccess({ fromParam: 'moduleId' }), getModuleContent);
 router.put('/:projectId/modules/:moduleId/content', authorize('admin'), updateModuleContent);
 router.post('/:projectId/modules/:moduleId/content/images', authorize('admin'), imageUploadMiddleware, uploadModuleImages);
 router.delete('/:projectId/modules/:moduleId/content/images', authorize('admin'), deleteModuleImage);
@@ -91,19 +92,22 @@ router.post('/:projectId/modules/:moduleId/content/graphs', authorize('admin'), 
 router.delete('/:projectId/modules/:moduleId/content/graphs', authorize('admin'), deleteGraph);
 
 // ── SHM config routes ──
+const SHM_MODULE = '/modules/structural-health-monitoring';
+const shmAccess = [verifyProjectAccess, verifyModuleAccess(SHM_MODULE)];
 const { getSHMConfig, updateSHMConfig } = require('../controllers/shmController');
-router.get('/:projectId/shm/:type', verifyProjectAccess, getSHMConfig);
-router.put('/:projectId/shm/:type', authorize('admin'), verifyProjectAccess, updateSHMConfig);
+router.get('/:projectId/shm/:type', ...shmAccess, getSHMConfig);
+router.put('/:projectId/shm/:type', authorize('admin'), ...shmAccess, updateSHMConfig);
 
 // ── SHM live MiniSEED routes ──
-router.get('/:projectId/shm/:type/live/source', verifyProjectAccess, getLiveSourceConfig);
-router.put('/:projectId/shm/:type/live/source', authorize('admin'), verifyProjectAccess, updateLiveSourceConfig);
-router.get('/:projectId/shm/:type/live/files', verifyProjectAccess, listLiveMseedFiles);
-router.post('/:projectId/shm/:type/live/upload', authorize('admin'), verifyProjectAccess, mseedUploadMiddleware, uploadLiveMseedFile);
-router.get('/:projectId/shm/:type/live/stream', verifyProjectAccess, streamLiveMseed);
-router.get('/:projectId/events/recent', verifyProjectAccess, getRecentProjectEvents);
-router.post('/:projectId/events', verifyProjectAccess, require('../controllers/eventController').createProjectEvent);
-router.get('/:projectId/events/process-status/recent', verifyProjectAccess, getRecentProjectEventProcessStatuses);
+router.get('/:projectId/shm/static/data', ...shmAccess, require('../controllers/shmStaticController').getStaticFtpData);
+router.get('/:projectId/shm/:type/live/source', ...shmAccess, getLiveSourceConfig);
+router.put('/:projectId/shm/:type/live/source', authorize('admin'), ...shmAccess, updateLiveSourceConfig);
+router.get('/:projectId/shm/:type/live/files', ...shmAccess, listLiveMseedFiles);
+router.post('/:projectId/shm/:type/live/upload', authorize('admin'), ...shmAccess, mseedUploadMiddleware, uploadLiveMseedFile);
+router.get('/:projectId/shm/:type/live/stream', ...shmAccess, streamLiveMseed);
+router.get('/:projectId/events/recent', ...shmAccess, getRecentProjectEvents);
+router.post('/:projectId/events', ...shmAccess, require('../controllers/eventController').createProjectEvent);
+router.get('/:projectId/events/process-status/recent', ...shmAccess, getRecentProjectEventProcessStatuses);
 
 // Report sub-routes (project-scoped)
 router.get('/:projectId/reports', verifyProjectAccess, getReports);
