@@ -311,3 +311,57 @@ exports.resetPassword = async (req, res) => {
         });
     }
 };
+
+
+// @desc    Change own password
+// @route   PUT /api/auth/change-password
+// @access  Private
+exports.changePassword = async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ success: false, message: 'Current and new password are required' });
+        }
+        if (String(newPassword).length < 8) {
+            return res.status(400).json({ success: false, message: 'New password must be at least 8 characters' });
+        }
+        const user = await User.findById(req.user._id).select('+password');
+        if (!(await user.comparePassword(currentPassword))) {
+            return res.status(401).json({ success: false, message: 'Current password is incorrect' });
+        }
+        user.password = newPassword; // hashed by the pre-save hook
+        await user.save();
+        res.status(200).json({ success: true, message: 'Password changed successfully' });
+    } catch (error) {
+        console.error('Change password error:', error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
+
+// @desc    Admin signs in as another user (works whatever that user's password is)
+// @route   POST /api/auth/impersonate/:userId
+// @access  Admin
+exports.impersonate = async (req, res) => {
+    try {
+        const target = await User.findById(req.params.userId)
+            .populate('assignedModules')
+            .populate('assignedProjects');
+        if (!target) return res.status(404).json({ success: false, message: 'User not found' });
+        if (target.role === 'admin') {
+            return res.status(400).json({ success: false, message: 'Cannot impersonate an admin account' });
+        }
+        if (!target.isActive) {
+            return res.status(400).json({ success: false, message: 'This account is deactivated' });
+        }
+        const token = jwt.sign({ id: target._id, impersonatedBy: req.user._id }, process.env.JWT_SECRET, {
+            expiresIn: '2h',
+        });
+        console.log(`[AUDIT] admin ${req.user.username || req.user._id} impersonated ${target.username || target._id}`);
+        const userResponse = target.toObject();
+        delete userResponse.password;
+        res.status(200).json({ success: true, token, user: userResponse });
+    } catch (error) {
+        console.error('Impersonate error:', error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
